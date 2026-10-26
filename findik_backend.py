@@ -180,10 +180,10 @@ def fetch_serbest_piyasa():
 # ============================================================
 # SOSYAL MEDYA / HABER TAKİP MOTORU
 # ============================================================
-def rss_oku(url, ad):
+def rss_oku(url, ad, timeout=20):
     """RSS/Atom akışındaki öğeleri döner: [{baslik, tarih, kaynak}]"""
     try:
-        r = requests.get(url, timeout=20,
+        r = requests.get(url, timeout=timeout,
                          headers={"User-Agent": "Mozilla/5.0 (FindikRadar/1.0)"})
         r.raise_for_status()
         import xml.etree.ElementTree as ET
@@ -198,7 +198,10 @@ def rss_oku(url, ad):
                      or it.findtext("{http://www.w3.org/2005/Atom}updated") or "")
             if baslik:
                 from html import unescape
-                sonuc.append({"baslik": unescape(baslik), "tarih": tarih[:25], "kaynak": ad})
+                baslik = unescape(baslik)
+                if ad.startswith("Google News") and " - " in baslik:
+                    baslik = baslik.rsplit(" - ", 1)[0]  # "Başlık - Kaynak" → başlık
+                sonuc.append({"baslik": baslik, "tarih": tarih[:25], "kaynak": ad})
         return sonuc
     except Exception as e:
         log("warn", f"Sosyal tarama: {ad} RSS okunamadı ({e.__class__.__name__})")
@@ -229,35 +232,69 @@ def fiyat_sinyali_mi(baslik):
     m = re.search(r"(1\d\d)[.,](\d{2})\s*(TL|₺|tl|lira)", baslik)
     return float(m.group(1) + "." + m.group(2)) if m else None
 
+# ---- İLÇE BAZLI YEREL TAKİP ----
+TUM_ILCELER = [(i, "Ordu") for i in ORDU_ILCELER] + [(i, "Giresun") for i in GIRESUN_ILCELER]
+ILCE_PENCERE = 8                    # her saat 8 ilçe taranır → 32 ilçe 4 saatte bir tam tur
+_tarama_sira = [0]                  # dönüşümlü tarama konumu
+GOOGLE_NEWS_RSS = "https://news.google.com/rss/search?q={q}&hl=tr&gl=TR&ceid=TR:tr"
+
+def google_news_ilce(ilce, il):
+    """Google News'te ilçe+fındık araması (sosyal medya dahil tüm web'i kapsar)."""
+    import urllib.parse
+    q = urllib.parse.quote(f"fındık {ilce} {il}")
+    return rss_oku(GOOGLE_NEWS_RSS.format(q=q), f"Google News — {ilce}", timeout=10)
+
+def bul_ilceler(baslik):
+    """Başlıkta geçen ilçeleri döndürür."""
+    b = baslik.lower()
+    return [ilce for ilce, _il in TUM_ILCELER if ilce.lower() in b]
+
 def sosyal_tara():
-    """Tüm sosyal/haber kaynaklarını tarar, fiyat sinyallerini ve
-    güncel fındık haberlerini STORE'a işler. Saatlik çağrılır."""
+    """Tüm sosyal/haber kaynaklarını tarar. Şehir geneli kaynaklar her saat,
+    ilçe bazlı kaynaklar dönüşümlü (her saat 8 ilçe) taranır.
+    Fiyat sinyalleri ve ilçe etiketli haberler STORE'a işlenir."""
     tum = []
-    for ad, tur, url in SOSYAL_KAYNAKLAR:
-        if tur == "rss":
-            tum += rss_oku(url, ad)
-        else:
-            tum += html_liste_oku(url, ad)
+    from concurrent.futures import ThreadPoolExecutor
+    # Tüm kaynaklar paralel taranır — yavaş/ölü kaynak diğerlerini bekletmez
+    gorevler = []
+    with ThreadPoolExecutor(max_workers=12) as havuz:
+        for ad, tur, url in SOSYAL_KAYNAKLAR:
+            if tur == "rss":
+                gorevler.append(havuz.submit(rss_oku, url, ad))
+            else:
+                gorevler.append(havuz.submit(html_liste_oku, url, ad))
+        konum = _tarama_sira[0]
+        pencere = TUM_ILCELER[konum:konum+ILCE_PENCERE] or TUM_ILCELER[:ILCE_PENCERE]
+        _tarama_sira[0] = (konum + ILCE_PENCERE) % len(TUM_ILCELER)
+        for ilce, il in pencere:
+            gorevler.append(havuz.submit(google_news_ilce, ilce, il))
+        for g in gorevler:
+            try:
+                tum += g.result()
+            except Exception:
+                pass
     if not tum:
         log("warn", "Sosyal tarama: hiçbir kaynaktan veri alınamadı")
         return
-    # Fiyat haberi olanları ayıkla
+    # Fiyat/fındık haberi olanları ayıkla
     ilgili = [x for x in tum if any(k.lower() in x["baslik"].lower() for k in FIYAT_ANAHTARLAR)]
     yeni_sayisi = 0
     with _LOCK:
         mevcut = {n[0] for n in STORE["news"]}
-        for x in ilgili[:12]:
+        for x in ilgili[:15]:
             anahtar = x["baslik"][:60]
             if anahtar in mevcut:
                 continue
-            STORE["news"].insert(0, [x["baslik"], f"{x['kaynak']} — {x['tarih'] or 'yeni'}"])
+            ilceler = bul_ilceler(x["baslik"])
+            STORE["news"].insert(0, [x["baslik"], f"{x['kaynak']} — {x['tarih'] or 'yeni'}", ilceler])
             yeni_sayisi += 1
-        STORE["news"] = STORE["news"][:20]
+        STORE["news"] = STORE["news"][:30]
     for x in ilgili:
         sinyal = fiyat_sinyali_mi(x["baslik"])
         if sinyal:
-            log("alert", f"💰 Fiyat sinyali ({x['kaynak']}): {x['baslik'][:80]} — tespit edilen: {sinyal:.2f} TL/kg")
-    log("info", f"🌐 Sosyal tarama: {len(tum)} öğe tarandı, {len(ilgili)} fındık haberi, {yeni_sayisi} tanesi yeniydi.")
+            log("alert", f"💰 Fiyat sinyali ({x['kaynak']}): {x['baslik'][:80]} — tespit: {sinyal:.2f} TL/kg")
+    taranan = ", ".join(i for i, _ in pencere)
+    log("info", f"🌐 Sosyal tarama: {len(tum)} öğe, {len(ilgili)} fındık haberi, {yeni_sayisi} yeni. İlçe turu: {taranan}")
     if yeni_sayisi:
         log("info", "📰 Haber akışı güncellendi.")
 
@@ -275,33 +312,84 @@ def yedek_veri():
                      "degisim": round(((i * 5) % 9 - 4) / 10, 2)})
     return rows
 
-def scrape_all():
-    """Tüm kaynakları tarar, STORE'u günceller. Her 10 dk'da bir çağrılır."""
-    rows, src = fetch_fiskobirlik()
-    if rows:
-        data = [{"il": ("Giresun" if r["ilce"] in GIRESUN_ILCELER else "Ordu"),
-                 "ilce": r["ilce"], "fiyat": r["fiyat"],
-                 "degisim": round(__import__("random").uniform(-0.8, 0.8), 2)}
-                for r in rows]
-        src_name = "FİSKOBİRLİK"
-    else:
-        data = yedek_veri()
-        src_name = "YEDEK (çevrimdışı)"
+HABER_KATEGORI = "https://www.habergazetesi.com.tr/findik-fiyatlari"
+UA = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/124.0 Safari/537.36"}
+# Resmi TMO 2026/27 alım fiyatları (50 randıman). Değişirse Render'da env ile güncelleyin.
+TMO = {"sezon": "2026/27",
+       "giresun": float(os.environ.get("TMO_GIRESUN", 255)),
+       "levant": float(os.environ.get("TMO_LEVANT", 250)),
+       "sivri": float(os.environ.get("TMO_SIVRI", 245)),
+       "kaynak": "TMO duyurusu (CNN Türk, NTV, Milliyet)"}
 
-    serbest = fetch_serbest_piyasa()
+def _fiyat(s):
+    """'199,75 TL' -> 199.75 ; '145-155 TL bandı' -> 150.0 ; yoksa None."""
+    vals = [float(n.replace(",", ".")) for n in re.findall(r"\d{2,3}(?:,\d{1,2})?", s)]
+    if not vals:
+        return None
+    v = sum(vals[:2]) / 2 if ("-" in s and len(vals) >= 2) else vals[0]
+    return round(v, 2) if 100 <= v <= 400 else None
+
+def tablo_oku(soup):
+    """Haber sayfasındaki 'İl | Yağlı | Levant | Sivri' tablosunu satırlara çevirir."""
+    rows = []
+    for tr in soup.find_all("tr"):
+        c = [x.get_text(" ", strip=True) for x in tr.find_all(["td", "th"])]
+        if len(c) < 2 or "kalite" in c[0].lower() or "tmo" in c[0].lower():
+            continue
+        f = _fiyat(c[1])
+        if not f:
+            continue
+        ad = re.sub(r"\s*Merkez$", "", c[0]).strip() or c[0]
+        rows.append({"il": ad, "ilce": ad, "fiyat": f,
+                     "levant": _fiyat(c[2]) if len(c) > 2 else None,
+                     "sivri": _fiyat(c[3]) if len(c) > 3 else None})
+    return rows
+
+def fetch_haber_fiyat():
+    """Güncel il il fiyat haberini bulur, tabloyu çözer. (satırlar, url, yayın_tarihi)"""
+    try:
+        r = requests.get(HABER_KATEGORI, headers=UA, timeout=TIMEOUT)
+        r.raise_for_status()
+        soup = BeautifulSoup(r.text, "lxml")
+        linkler = []
+        for a in soup.find_all("a", href=True):
+            t = a.get_text(" ", strip=True).lower()
+            h = a["href"]
+            if "fındık" in t and "fiyat" in t and h.startswith("http") and h not in linkler:
+                linkler.append(h)
+        adaylar = []
+        for url in linkler[:4]:
+            try:
+                p = requests.get(url, headers=UA, timeout=TIMEOUT)
+                ps = BeautifulSoup(p.text, "lxml")
+                rows = tablo_oku(ps)
+                m = ps.find("meta", attrs={"property": "article:published_time"})
+                if len(rows) >= 3:
+                    adaylar.append((m["content"] if m else "", url, rows))
+            except Exception as e:
+                log("warn", f"Haber sayfası okunamadı: {url} ({e.__class__.__name__})")
+        if adaylar:
+            tarih, url, rows = max(adaylar, key=lambda x: x[0])
+            log("info", f"Fiyat haberi çözüldü: {len(rows)} satır, yayın {tarih[:16]} — {url}")
+            return rows, url, tarih
+        log("alert", "Fiyat tablosu bulunamadı (site yapısı değişmiş olabilir)")
+    except Exception as e:
+        log("alert", f"Fiyat kaynağına ulaşılamadı: {e.__class__.__name__}: {e}")
+    return None, None, None
+
+def scrape_all():
+    """Gerçek veriyi çeker. Başarısızsa son gerçek veri korunur; ASLA sahte veri üretilmez."""
+    rows, url, tarih = fetch_haber_fiyat()
     with _LOCK:
-        eski = {d["ilce"]: d["fiyat"] for d in STORE["districts"]}
-        for d in data:
-            if d["ilce"] in eski:
-                d["degisim"] = round(d["fiyat"] - eski[d["ilce"]], 2)
-        STORE["districts"] = data
-        STORE["updated_at"] = datetime.datetime.now().isoformat(timespec="seconds")
-        STORE["source"] = src_name + (f" + serbest({serbest})" if serbest else "")
-        if not STORE["buyers"]:
-            STORE["buyers"] = BUYERS_SABLON
-        if not STORE["news"]:
-            STORE["news"] = NEWS_SABLON
-    log("info", f"Güncelleme: {len(data)} ilçe fiyatı alındı (kaynak: {src_name})")
+        if rows and url != STORE.get("source_url"):
+            eski = {d["ilce"]: d["fiyat"] for d in STORE["districts"]}
+            for d in rows:
+                d["degisim"] = round(d["fiyat"] - eski[d["ilce"]], 2) if d["ilce"] in eski else None
+            STORE["districts"] = rows
+            STORE["source"] = "Haber Gazetesi — serbest piyasa göstergesi (50 randıman)"
+            STORE["source_url"], STORE["veri_tarihi"] = url, tarih
+        if rows:
+            STORE["updated_at"] = datetime.datetime.now().isoformat(timespec="seconds")
     kontrol_alarms()
 
 # ============================================================
@@ -389,8 +477,10 @@ def api_yanit(yol):
             avg = round(sum(x["fiyat"] for x in d) / len(d), 2) if d else 0
             return 200, {"ok": True, "updated_at": STORE["updated_at"],
                          "source": STORE["source"],
-                         "avg": avg,
+                         "avg": avg, "source_url": STORE.get("source_url"), "veri_tarihi": STORE.get("veri_tarihi"),
                          "districts": d}
+        if yol == "/api/tmo":
+            return 200, {"ok": True, **TMO}
         if yol == "/api/buyers":
             return 200, {"ok": True, "buyers": STORE["buyers"]}
         if yol == "/api/news":
@@ -469,11 +559,16 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         yol = self.path.split("?")[0]
-        if yol == "/":
-            return self._gonder(200, {"ok": True, "servis": "FındıkRadar API",
-                                      "uçlar": ["/api/prices", "/api/buyers",
-                                                "/api/news", "/api/scan-log",
-                                                "/api/alarms"]})
+        if yol in ("/", "/index.html"):
+            try:
+                with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "findik_takip.html"), "rb") as f:
+                    body = f.read()
+                self.send_response(200); self._cors()
+                self.send_header("Content-Type", "text/html; charset=utf-8")
+                self.send_header("Content-Length", str(len(body))); self.end_headers()
+                self.wfile.write(body); return
+            except OSError:
+                return self._gonder(200, {"ok": True, "servis": "FındıkRadar API"})
         kod, veri = api_yanit(yol)
         self._gonder(kod, veri)
 
