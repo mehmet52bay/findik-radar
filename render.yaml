@@ -1,0 +1,12 @@
+# Render.com otomatik yapılandırma — bu dosya ile "New Web Service" tek adımda kurulur
+services:
+  - type: web
+    name: findik-radar
+    env: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: python3 findik_backend.py
+    healthCheckPath: /
+    envVars:
+      - key: TELEGRAM_TOKEN
+        sync: false   # panelden doldurun (Adım 2)
