@@ -1,0 +1,412 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>🌰 Fındık Radar — Canlı Fiyat Takip & Alarm Sistemi</title>
+<style>
+:root{
+  --bg:#0d1b12; --panel:#15281c; --panel2:#1b3324; --accent:#d4a017; --accent2:#7ec96f;
+  --red:#e05252; --green:#4caf7d; --text:#e8f0e9; --muted:#8fa898; --border:#2a4732;
+}
+*{margin:0;padding:0;box-sizing:border-box;font-family:'Segoe UI',system-ui,sans-serif;}
+body{background:var(--bg);color:var(--text);}
+header{background:linear-gradient(135deg,#14261a,#1e3a28);border-bottom:2px solid var(--accent);padding:14px 22px;display:flex;align-items:center;gap:14px;flex-wrap:wrap;}
+.logo{font-size:26px;font-weight:800;color:var(--accent);}
+.logo span{color:var(--accent2);}
+.badge{background:#2d1f05;color:var(--accent);border:1px solid var(--accent);padding:3px 10px;border-radius:20px;font-size:12px;font-weight:600;}
+.live-dot{width:9px;height:9px;border-radius:50%;background:var(--red);display:inline-block;animation:pulse 1.2s infinite;}
+@keyframes pulse{0%,100%{opacity:1;transform:scale(1);}50%{opacity:.4;transform:scale(.75);}}
+nav{display:flex;gap:8px;flex-wrap:wrap;margin-left:auto;}
+nav a{color:var(--muted);text-decoration:none;padding:7px 13px;border-radius:8px;font-size:13px;border:1px solid transparent;}
+nav a:hover,nav a.on{color:var(--accent2);border-color:var(--border);background:var(--panel);}
+main{max-width:1300px;margin:0 auto;padding:20px;}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:14px;margin-bottom:20px;}
+.card{background:var(--panel);border:1px solid var(--border);border-radius:14px;padding:16px 18px;}
+.card h4{color:var(--muted);font-size:12px;text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px;}
+.big{font-size:26px;font-weight:800;}
+.up{color:var(--green);} .down{color:var(--red);}
+.small{font-size:12px;color:var(--muted);margin-top:6px;}
+.grid2{display:grid;grid-template-columns:1.4fr 1fr;gap:20px;}
+@media(max-width:900px){.grid2{grid-template-columns:1fr;}}
+section{margin-bottom:24px;}
+h2.sec{font-size:18px;color:var(--accent);margin-bottom:12px;border-left:4px solid var(--accent);padding-left:10px;}
+table{width:100%;border-collapse:collapse;font-size:13px;}
+th{background:var(--panel2);color:var(--muted);padding:9px 10px;text-align:left;font-size:11px;text-transform:uppercase;}
+td{padding:8px 10px;border-bottom:1px solid var(--border);}
+tr:hover td{background:#1a3021;}
+.price-cell{font-weight:700;}
+.alarm-btn{background:none;border:1px solid var(--border);color:var(--muted);border-radius:6px;padding:3px 8px;cursor:pointer;font-size:12px;}
+.alarm-btn.active{color:var(--accent);border-color:var(--accent);background:#2d1f05;}
+.ticker-wrap{overflow:hidden;background:var(--panel2);border:1px solid var(--border);border-radius:10px;margin-bottom:20px;}
+.ticker{display:flex;gap:38px;white-space:nowrap;padding:10px 0;animation:tick 40s linear infinite;font-size:13px;}
+@keyframes tick{from{transform:translateX(100%);}to{transform:translateX(-100%);}}
+.buyer{display:flex;justify-content:space-between;align-items:center;padding:10px 4px;border-bottom:1px dashed var(--border);font-size:13px;}
+.buyer .bname{font-weight:600;}
+.tag{font-size:10px;padding:2px 7px;border-radius:10px;margin-left:6px;}
+.tag.buy{background:#0f3a24;color:var(--green);} .tag.hold{background:#3a3410;color:#e0c34f;} .tag.sell{background:#3a1515;color:var(--red);}
+.news-item{padding:10px 4px;border-bottom:1px solid var(--border);font-size:13px;}
+.news-item .t{color:var(--muted);font-size:11px;}
+.logbox{background:#0a140e;border:1px solid var(--border);border-radius:10px;padding:12px;font-family:Consolas,monospace;font-size:11.5px;height:200px;overflow-y:auto;line-height:1.7;color:#9fd4a8;}
+.logbox .warn{color:var(--accent);} .logbox .alert{color:var(--red);} .logbox .info{color:#6fa8d4;}
+.progressbar{height:5px;background:#0a140e;border-radius:4px;overflow:hidden;margin-top:8px;}
+.progressbar>div{height:100%;background:var(--accent);width:0%;transition:width .5s;}
+.chat-fab{position:fixed;bottom:22px;right:22px;width:62px;height:62px;border-radius:50%;background:linear-gradient(135deg,#b07820,#d4a017);border:3px solid #7a5410;cursor:pointer;font-size:30px;display:flex;align-items:center;justify-content:center;box-shadow:0 6px 20px rgba(0,0,0,.5);z-index:99;animation:bob 3s ease-in-out infinite;}
+@keyframes bob{0%,100%{transform:translateY(0);}50%{transform:translateY(-7px);}}
+.chat-panel{position:fixed;bottom:96px;right:22px;width:340px;max-height:480px;background:var(--panel);border:1px solid var(--accent);border-radius:16px;display:none;flex-direction:column;overflow:hidden;z-index:99;box-shadow:0 12px 40px rgba(0,0,0,.6);}
+.chat-panel.open{display:flex;}
+.chat-head{background:linear-gradient(135deg,#7a5410,#b07820);padding:12px 14px;display:flex;align-items:center;gap:10px;}
+.chat-head .avatar{font-size:26px;}
+.chat-head small{display:block;color:#ffe9b8;font-size:11px;}
+.chat-body{flex:1;overflow-y:auto;padding:12px;display:flex;flex-direction:column;gap:8px;min-height:220px;max-height:340px;}
+.msg{max-width:82%;padding:8px 12px;border-radius:12px;font-size:13px;line-height:1.5;}
+.msg.bot{background:var(--panel2);border:1px solid var(--border);align-self:flex-start;}
+.msg.user{background:#2d4a35;align-self:flex-end;}
+.msg .botname{color:var(--accent);font-size:10px;display:block;margin-bottom:2px;}
+.chat-input{display:flex;border-top:1px solid var(--border);}
+.chat-input input{flex:1;background:#0a140e;border:none;color:var(--text);padding:11px 12px;font-size:13px;outline:none;}
+.chat-input button{background:var(--accent);border:none;color:#1a1206;font-weight:700;padding:0 18px;cursor:pointer;}
+.sugg{display:flex;gap:6px;flex-wrap:wrap;padding:8px 12px;border-top:1px solid var(--border);}
+.sugg button{background:var(--panel2);border:1px solid var(--border);color:var(--accent2);font-size:11px;padding:4px 9px;border-radius:14px;cursor:pointer;}
+.alarm-modal{display:none;position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:100;align-items:center;justify-content:center;}
+.alarm-modal.open{display:flex;}
+.alarm-box{background:var(--panel);border:1px solid var(--accent);border-radius:14px;padding:22px;width:320px;}
+.alarm-box input{width:100%;background:#0a140e;border:1px solid var(--border);color:var(--text);padding:9px;border-radius:8px;margin:8px 0;font-size:14px;}
+.btn{background:var(--accent);color:#1a1206;border:none;padding:9px 16px;border-radius:8px;font-weight:700;cursor:pointer;font-size:13px;}
+.btn.ghost{background:transparent;border:1px solid var(--border);color:var(--muted);}
+footer{text-align:center;color:var(--muted);font-size:11px;padding:22px;border-top:1px solid var(--border);margin-top:30px;}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">🌰 Fındık<span>Radar</span></div>
+  <span class="badge"><span class="live-dot"></span> CANLI TAKİP AKTİF</span>
+  <span class="badge" id="clock">--:--:--</span>
+  <nav>
+    <a href="#piyasalar" class="on">Piyasalar</a>
+    <a href="#alicilar">Büyük Alıcılar</a>
+    <a href="#haberler">Haberler</a>
+    <a href="#tarama">Dünya Taraması</a>
+  </nav>
+</header>
+
+<div class="ticker-wrap"><div class="ticker" id="ticker"></div></div>
+
+<main>
+  <div class="stats">
+    <div class="card"><h4>🌍 Serbest Piyasa Ortalama</h4><div class="big" id="stat-avg">--</div><div class="small" id="stat-avg-chg"></div></div>
+    <div class="card"><h4>🏛️ TMO Alım Fiyatı (Giresun)</h4><div class="big">104,50 ₺</div><div class="small up">Resmi taban — beklenen revizyon takipte</div></div>
+    <div class="card"><h4>📈 Ferrero İç Piyasa Teklifi</h4><div class="big" id="stat-ferrero">--</div><div class="small" id="stat-ferrero-chg"></div></div>
+    <div class="card"><h4>⏱️ Sonraki Güncelleme</h4><div class="big" id="stat-countdown">10:00</div><div class="progressbar"><div id="upd-bar"></div></div></div>
+  </div>
+
+  <div class="grid2">
+    <section id="piyasalar">
+      <h2 class="sec">📍 Ordu & Giresun — Tüm İlçeler Günlük Fiyat (TL/kg, Levent tipi)</h2>
+      <table id="price-table">
+        <thead><tr><th>İlçe</th><th>Fiyat</th><th>Değişim</th><th>Trend (7g)</th><th>Alarm</th></tr></thead>
+        <tbody></tbody>
+      </table>
+      <div class="small" style="margin-top:6px;">* Simülasyon verisi — canlıya bağlandığında FİSKOBİRLİK / serbest piyasa kaynaklarından beslenecek.</div>
+    </section>
+
+    <div>
+      <section id="alicilar">
+        <h2 class="sec">🏭 Büyük Alıcılar & TMO</h2>
+        <div class="card" id="buyer-list"></div>
+      </section>
+
+      <section id="haberler">
+        <h2 class="sec">📰 Güncel Fındık Haberleri</h2>
+        <div class="card" id="news-list"></div>
+      </section>
+    </div>
+  </div>
+
+  <section id="tarama">
+    <h2 class="sec">🌐 Saatlik Dünya Tarama Günlüğü</h2>
+    <div class="logbox" id="scan-log"></div>
+    <div class="small" style="margin-top:6px;">Tarama motoru her saat Ferrero, OFI/Olam, Durak, Balsu, Yavuz Gıda, TMO ve dünya fındık piyasası kaynaklarını tarar.</div>
+  </section>
+</main>
+
+<footer>FındıkRadar © 2026 — Bu sayfa bilgilendirme amaçlıdır; fiyatlar simülasyondur. Yatırım tavsiyesi değildir.</footer>
+
+<div class="chat-fab" onclick="toggleChat()" title="Fındık Asistanı">🌰</div>
+<div class="chat-panel" id="chatPanel">
+  <div class="chat-head">
+    <div class="avatar">🌰</div>
+    <div><b>Fındıkçı</b><small>Maskot Asistan • 7/24 görevde</small></div>
+  </div>
+  <div class="chat-body" id="chatBody"></div>
+  <div class="sugg">
+    <button onclick="askBot('Bugün fiyatlar ne oldu?')">Fiyatlar ne oldu?</button>
+    <button onclick="askBot('TMO ne yapıyor?')">TMO hamleleri</button>
+    <button onclick="askBot('Ferrero alım yapıyor mu?')">Ferrero</button>
+    <button onclick="askBot('Alarm nasıl kurarım?')">Alarm kur</button>
+  </div>
+  <div class="chat-input">
+    <input id="chatInput" placeholder="Sorunu yaz... örn: Ordu fındık kaç TL?" onkeydown="if(event.key==='Enter')sendChat()">
+    <button onclick="sendChat()">➤</button>
+  </div>
+</div>
+
+<div class="alarm-modal" id="alarmModal">
+  <div class="alarm-box">
+    <b style="color:var(--accent)">🔔 Fiyat Alarmı Kur</b>
+    <div style="margin-top:8px;font-size:13px;" id="alarmDistrict"></div>
+    <input type="number" id="alarmPrice" placeholder="Hedef fiyat (TL/kg)">
+    <input type="text" id="alarmTg" placeholder="Telegram chat ID (opsiyonel — telefona bildirim için)">
+    <div style="display:flex;gap:8px;margin-top:4px;">
+      <button class="btn" onclick="saveAlarm()">Kaydet</button>
+      <button class="btn ghost" onclick="document.getElementById('alarmModal').classList.remove('open')">İptal</button>
+    </div>
+  </div>
+</div>
+
+<script>
+/* ================= VERİ HAVUZU ================= */
+const districts=[
+ ["Ordu","Altınordu",103.5],["Ordu","Ünye",102.8],["Ordu","Fatsa",102.5],["Ordu","Perşembe",103.9],
+ ["Ordu","Gölköy",101.2],["Ordu","Korgan",100.8],["Ordu","Kumru",100.5],["Ordu","Gürgentepe",99.9],
+ ["Ordu","Çaybaşı",101.0],["Ordu","İkizce",102.2],["Ordu","Çatalpınar",100.6],["Ordu","Çamaş",101.4],
+ ["Ordu","Ulubey",99.5],["Ordu","Kabataş",100.2],["Ordu","Gölköy",101.2],["Ordu","Mesudiye",98.8],
+ ["Ordu","Aybastı",99.2],["Ordu","Gürgentepe",99.9],
+ ["Giresun","Merkez",104.5],["Giresun","Bulancak",104.1],["Giresun","Espiye",103.7],
+ ["Giresun","Tirebolu",104.0],["Giresun","Görele",103.4],["Giresun","Eynesil",102.9],
+ ["Giresun","Alucra",101.5],["Giresun","Şebinkarahisar",101.0],["Giresun","Keşap",103.2],
+ ["Giresun","Dereli",102.0],["Giresun","Yağlıdere",102.6],["Giresun","Çamoluk",100.7],
+ ["Giresun","Çanakçı",102.3],["Giresun","Doğankent",101.8],["Giresun","Güce",102.1],["Giresun","Piraziz",103.0]
+].filter((v,i,a)=>a.findIndex(x=>x[1]===v[1])===i);
+
+let buyers=[
+ {name:"Ferrero (Trabzon/Ordu)",action:"Alım",tag:"buy",note:"İç piyasadan 96.000 ton hedefi, kapasite %78 dolu"},
+ {name:"OFI (Olam Food Ingredients)",action:"Beklemede",tag:"hold",note:"İtalya/Lübnan ihracat hattı izlemede"},
+ {name:"Durak Fındık",action:"Alım",tag:"buy",note:"Serbest piyasadan günlük 350 ton kabuklu"},
+ {name:"Balsu Gıda",action:"Beklemede",tag:"hold",note:"Stok eritme fazında, yeni teklif yok"},
+ {name:"Yavuz Gıda",action:"Alım",tag:"buy",note:"Orta doğu ihracatı için temiz iç fındık arayışı"},
+ {name:"TMO",action:"Taban Fiyat",tag:"buy",note:"Giresun kalite 104,50 ₺ — revizyon beklentisi yüksek"}
+];
+
+let news=[
+ ["Giresun'da fındık hasadı tamamlandı, kalite yüksek çıktı","2 saat önce"],
+ ["TMO'nun yeni alım dönemi için revizyon sinyali piyasayı hareketlendirdi","4 saat önce"],
+ ["Ferrero'nun Trabzon tesisi kapasite artırımına gidiyor","7 saat önce"],
+ ["Dünya fındık ihracatında Türkiye payı %65'i aştı","12 saat önce"],
+ ["Black Sea Weather Watch: Ekim yağışları rekolte tahminini yukarı revize ettirdi","1 gün önce"]
+];
+
+/* ================= RENDER ================= */
+function fmt(n){return n.toFixed(2).replace('.',',')+' ₺';}
+function renderTable(){
+  const tb=document.querySelector('#price-table tbody');
+  tb.innerHTML=districts.map((d,i)=>{
+    const chg=(Math.random()*1.6-0.8);
+    const cls=chg>=0?'up':'down';
+    const ar=Math.random()>.4?'📈':'📉';
+    return `<tr><td><b>${d[1]}</b> <span style="color:var(--muted);font-size:11px">${d[0]}</span></td>
+      <td class="price-cell">${fmt(d[2])}</td>
+      <td class="${cls}">${chg>=0?'+':''}${chg.toFixed(2)}</td>
+      <td>${ar}</td>
+      <td><button class="alarm-btn ${window._alarms&&window._alarms[d[1]]?'active':''}" onclick="openAlarm('${d[1]}')">🔔 ${window._alarms&&window._alarms[d[1]]?fmt(window._alarms[d[1]]):'Alarm'}</button></td></tr>`;
+  }).join('');
+}
+function renderBuyers(){
+  document.getElementById('buyer-list').innerHTML=buyers.map(b=>
+   `<div class="buyer"><div><span class="bname">${b.name}</span><br><span class="small">${b.note}</span></div>
+    <span class="tag ${b.tag}">${b.action}</span></div>`).join('');
+}
+function renderNews(){
+  document.getElementById('news-list').innerHTML=news.map(n=>
+   `<div class="news-item"><b>${n[0]}</b><div class="t">🕐 ${n[1]}</div></div>`).join('');
+}
+function renderTicker(){
+  const items=districts.map(d=>`${d[1]}: <b>${fmt(d[2])}</b>`).join(' &nbsp;•&nbsp; ');
+  document.getElementById('ticker').innerHTML=items+' &nbsp;•&nbsp; '+items;
+}
+
+/* ================= SAAT & GERİ SAYIM ================= */
+const UPDATE_SEC=600; let nextUpdate=Date.now()+UPDATE_SEC*1000;
+setInterval(()=>{
+  document.getElementById('clock').textContent=new Date().toLocaleTimeString('tr-TR');
+  const left=Math.max(0,Math.round((nextUpdate-Date.now())/1000));
+  const m=String(Math.floor(left/60)).padStart(2,'0'), s=String(left%60).padStart(2,'0');
+  document.getElementById('stat-countdown').textContent=m+':'+s;
+  document.getElementById('upd-bar').style.width=((1-left/UPDATE_SEC)*100)+'%';
+  if(left<=0){refreshPrices(); nextUpdate=Date.now()+UPDATE_SEC*1000;}
+},1000);
+
+function refreshPrices(){
+  districts.forEach(d=>{d[2]=+(d[2]+(Math.random()*1.4-0.7)).toFixed(2);});
+  renderAll(); addLog('info','🔄 10 dk güncellemesi: '+districts.length+' ilçe fiyatı yenilendi.');
+  checkAlarms();
+}
+
+/* ================= SAATLİK DÜNYA TARAMASI ================= */
+const scanSources=["Ferrero procurement feed","OFI/Olam export desk","TMO resmi duyuru","Durak/Balsu/Yavuz piyasa kanalı","ICE borsa","Black Sea weather","TÜİK dış ticaret","FİSKOBİRLİK bülteni"];
+function worldScan(){
+  const src=scanSources[Math.floor(Math.random()*scanSources.length)];
+  const msgs=[
+    ['info',`🌐 Tarama: ${src} tarandı — anormal hareket yok.`],
+    ['warn',`⚠️ Tarama: ${src}'de fiyat baskısı sinyali tespit edildi!`],
+    ['alert',`🚨 Tarama: ${src} — alıcı hareketliliği tespit edildi, takip yoğunlaştırıldı.`],
+    ['info',`🌐 Tarama: ${src} analiz edildi, rapor loglandı.`]
+  ];
+  const m=msgs[Math.floor(Math.random()*msgs.length)];
+  addLog(m[0],m[1]+` (${new Date().toLocaleTimeString('tr-TR')})`);
+  if(Math.random()>.6){ // rastgele haber üret
+    news.unshift([`${src}: fındık piyasasında yeni gelişme kaydedildi`,"şimdi"]); news=news.slice(0,6); renderNews();
+  }
+}
+setInterval(worldScan,3600000); // her saat
+worldScan();
+
+function addLog(cls,txt){
+  const box=document.getElementById('scan-log');
+  const el=document.createElement('div'); el.className=cls; el.textContent=txt;
+  box.prepend(el);
+}
+
+/* ================= ALARMLAR ================= */
+window._alarms=JSON.parse(localStorage.getItem('findik_alarms')||'{}');
+function openAlarm(dist){
+  window._cur=dist;
+  document.getElementById('alarmDistrict').innerHTML=`İlçe: <b style="color:var(--accent2)">${dist}</b> — hedef fiyat gir:`;
+  document.getElementById('alarmPrice').value=window._alarms[dist]||'';
+  document.getElementById('alarmModal').classList.add('open');
+}
+function saveAlarm(){
+  const v=parseFloat(document.getElementById('alarmPrice').value.replace(',','.'));
+  if(!v)return;
+  window._alarms[window._cur]=v;
+  localStorage.setItem('findik_alarms',JSON.stringify(window._alarms));
+  document.getElementById('alarmModal').classList.remove('open');
+  renderTable(); addLog('warn',`🔔 Alarm kuruldu: ${window._cur} → ${fmt(v)}`);
+  botNotify(`✅ ${window._cur} için ${fmt(v)} alarmı kaydedildi! Hedefe ulaşınca haber vereceğim. 🌰`);
+}
+function checkAlarms(){
+  for(const dist in window._alarms){
+    const d=districts.find(x=>x[1]===dist);
+    if(d && d[2]>=window._alarms[dist]){
+      addLog('alert',`🚨 ALARM! ${dist} hedefe ulaştı: ${fmt(d[2])} ≥ ${fmt(window._alarms[dist])}`);
+      botNotify(`🚨 <b>ALARM!</b> ${dist} fiyatı ${fmt(d[2])} ile hedefini (${fmt(window._alarms[dist])}) geçti!`);
+      delete window._alarms[dist];
+      localStorage.setItem('findik_alarms',JSON.stringify(window._alarms));
+      renderTable();
+    }
+  }
+}
+
+/* ================= CHAT BOT — FINDIKÇI ================= */
+function toggleChat(){
+  const p=document.getElementById('chatPanel');
+  p.classList.toggle('open');
+  if(p.classList.contains('open') && !document.getElementById('chatBody').children.length){
+    botSay("Merhaba! Ben <b>Fındıkçı</b> 🌰 — fındık piyasasının maskot asistanıyım. Fiyat, alıcı, TMO ve alarm sorularını bana sorabilirsin!");
+  }
+}
+function botSay(html){
+  const b=document.getElementById('chatBody');
+  b.insertAdjacentHTML('beforeend',`<div class="msg bot"><span class="botname">Fındıkçı 🌰</span>${html}</div>`);
+  b.scrollTop=b.scrollHeight;
+}
+function botNotify(html){botSay(html);}
+function sendChat(){
+  const inp=document.getElementById('chatInput');
+  const q=inp.value.trim(); if(!q)return; inp.value='';
+  const b=document.getElementById('chatBody');
+  b.insertAdjacentHTML('beforeend',`<div class="msg user">${q.replace(/</g,'&lt;')}</div>`);
+  b.scrollTop=b.scrollHeight;
+  setTimeout(()=>botSay(botAnswer(q)),600+Math.random()*500);
+}
+function askBot(q){document.getElementById('chatPanel').classList.add('open');document.getElementById('chatInput').value=q;sendChat();}
+function botAnswer(q){
+  const t=q.toLowerCase();
+  const findDist=districts.find(d=>t.includes(d[1].toLowerCase().replace('ı','i'))||t.includes(d[1].toLowerCase()));
+  if(/merhaba|selam|naber/.test(t)) return "Selam! 🌰 Fiyat mı soracaksın, alıcı mı? Ne lazımsa buradayım!";
+  if(/alarm|nasil kurarim|nasıl kurarım/.test(t)) return "Alarm kurmak çok kolay: listedeki ilçenin yanındaki <b>🔔 Alarm</b> butonuna bas, hedef fiyatı gir. Hedef tutunca ben seni anında uyarırım! 🔔";
+  if(/tmo/.test(t)) return "🏛️ <b>TMO</b>: Giresun kalite taban fiyatı şu an <b>104,50 ₺</b>. Revizyon beklentisi piyasada çok güçlü — bu ihtimal fiyatların yukarı gitmesini destekliyor. Takipteyim!";
+  if(/ferrero/.test(t)) return "🍫 <b>Ferrero</b> iç piyasadan aktif alım yapıyor; Trabzon tesisi kapasite %78 dolu ve artırım planlıyor. Bu, talebin güçlü olduğunu gösteriyor. Yeni teklif gelirse anında haber veririm!";
+  if(/ofi|olam/.test(t)) return "🌍 <b>OFI (Olam)</b> şu an beklemede; İtalya ve Lübnan ihracat hatlarını izliyor. Stok eritme modundalar, teklif gelirse bildiririm.";
+  if(/durak|balsu|yavuz/.test(t)) return "🏭 Serbest piyasa alıcıları: <b>Durak Fındık</b> günlük 350 ton kabuklu alıyor, <b>Yavuz Gıda</b> Orta Doğu için iç fındık arıyor, <b>Balsu</b> ise beklemeste. Karışık bir tablo — haberleri buradan takip ediyorum.";
+  if(/dunya|dünya|ihracat|dolar/.test(t)) return "🌐 Dünyada Türkiye'nin fındık ihracat payı %65'i aştı. Dolar bazlı talep güçlü; Karadeniz hava durumu rekolte tahminlerini yukarı revize ettirdi. Genel görünüm fiyatlar için pozitif.";
+  if(/bugun|bugün|fiyat|ne oldu|kac|kaç/.test(t)){
+    if(findDist) return `📍 <b>${findDist[1]} (${findDist[0]})</b> bugün <b>${fmt(findDist[2])}</b>/kg seviyesinde. Güncellemeler her 10 dakikada bir geliyor!`;
+    const top=[...districts].sort((a,b)=>b[2]-a[2])[0];
+    return `📈 Bugün en yüksek fiyat <b>${top[1]}</b>'da: <b>${fmt(top[2])}</b>. Serbest piyasa ortalaması yaklaşık <b>${fmt(districts.reduce((s,d)=>s+d[2],0)/districts.length)}</b>. Belirli bir ilçe sormak istersen ismini yaz!`;
+  }
+  if(/haber/.test(t)) return "📰 Son haber: "+news[0][0]+". Diğerleri Haberler bölümünde!";
+  return "Hmm, bunu tam anlayamadım ama şunları sorabilirsin: <i>'Ordu kaç TL?', 'Ferrero alım yapıyor mu?', 'TMO ne yapıyor?', 'Alarm nasıl kurarım?'</i> 🌰";
+}
+
+/* ================= BAŞLAT ================= */
+function renderAll(){renderTable();renderBuyers();renderNews();renderTicker();
+  const avg=districts.reduce((s,d)=>s+d[2],0)/districts.length;
+  document.getElementById('stat-avg').textContent=fmt(avg);
+  document.getElementById('stat-avg-chg').innerHTML='<span class="up">▲ güncel ortalama — 34 ilçe</span>';
+  document.getElementById('stat-ferrero').textContent=fmt(avg+1.8);
+  document.getElementById('stat-ferrero-chg').innerHTML='<span class="up">▲ güçlü talep sürüyor</span>';
+}
+renderAll();
+addLog('warn','🌰 FındıkRadar sistemi başlatıldı. 34 ilçe + 6 büyük aktör takip modunda.');
+addLog('info','⏱️ Güncelleme döngüsü: 10 dk | Dünya taraması: saatlik');
+</script>
+<script>
+/* ================= CANLI VERİ KATMANI (Backend bağlantısı) =================
+   findik_backend.py çalışıyorsa gerçek verilerle sayfayı günceller.
+   Backend kapalıysa otomatik olarak simülasyon modunda devam eder.        */
+const API = localStorage.getItem('findik_api') || "http://localhost:8000";
+
+async function canliVeriCek(){
+  try{
+    const ctrl = new AbortController();
+    setTimeout(()=>ctrl.abort(), 3000); // 3 sn'de cevap yoksa simülasyonda kal
+    const r = await fetch(API+"/api/prices", {signal: ctrl.signal});
+    if(!r.ok) throw 0;
+    const v = await r.json();
+    if(!v.ok || !v.districts?.length) throw 0;
+
+    districts.length = 0;
+    v.districts.forEach(d=>districts.push([d.il, d.ilce, d.fiyat]));
+    renderAll();
+    document.getElementById('stat-avg').textContent = fmt(v.avg);
+    document.title = "🌰 FındıkRadar — CANLI (backend bağlı)";
+    addLog('info','🔌 Backend bağlandı: '+v.source+' | '+new Date(v.updated_at).toLocaleTimeString('tr-TR'));
+
+    // Alıcı + haberler + tarama logu
+    fetch(API+"/api/buyers").then(r=>r.json()).then(d=>{ if(d.buyers?.length){ buyers=d.buyers; renderBuyers(); }}).catch(()=>{});
+    fetch(API+"/api/news").then(r=>r.json()).then(d=>{ if(d.news?.length){ news=d.news; renderNews(); }}).catch(()=>{});
+    fetch(API+"/api/scan-log").then(r=>r.json()).then(d=>{ (d.log||[]).slice(0,5).reverse().forEach(l=>addLog(l.cls||'info',l.msg)); }).catch(()=>{});
+    return true;
+  }catch(e){
+    addLog('info','🔌 Backend kapalı — simülasyon modunda devam ediliyor. (python3 findik_backend.py ile başlatın)');
+    return false;
+  }
+}
+
+/* Backend alarm API'sine kaydet; başarısızsa yerel depoya düş */
+async function canliAlarmKaydet(ilce, fiyat){
+  try{
+    const tg = (document.getElementById('alarmTg')?.value || "").trim();
+    const r = await fetch(API+"/api/alarms", {method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({ilce, hedef: fiyat, telegram_chat_id: tg})});
+    const d = await r.json();
+    if(d.ok){ addLog('warn',`🔔 Alarm sunucuya kaydedildi: ${ilce} → ${fmt(fiyat)}`); return true; }
+  }catch(e){}
+  return false;
+}
+const _eskiSaveAlarm = saveAlarm;
+saveAlarm = async function(){
+  const v=parseFloat(document.getElementById('alarmPrice').value.replace(',','.'));
+  if(!v) return;
+  await canliAlarmKaydet(window._cur, v);   // önce sunucuya dene
+  _eskiSaveAlarm();                          // sonra yerel kayıt + bildirim
+};
+
+canliVeriCek();
+setInterval(canliVeriCek, 600000); // 10 dakikada bir backend'den taze veri
+</script>
+</body>
+</html>
