@@ -30,10 +30,40 @@ UPDATE_INTERVAL_SEC = 600      # 10 dakikada bir fiyat güncelleme
 SCAN_INTERVAL_SEC   = 3600     # saatlik dünya taraması
 TIMEOUT = 15
 
-KAYNAKLAR = {
-    "fiskobirlik": "https://www.fiskobirlik.com.tr/fiyatlar",
-    "serbest":     "https://www.findik.com/fiyatlar",   # örnek: serbest piyasa sayfası
-}
+# Aday kaynak adresleri — ilki çalışmazsa sırayla diğerleri denenir
+FISKOBIRLIK_URLS = [
+    "https://www.fiskobirlik.com.tr/fiyatlar",
+    "https://fiskobirlik.com.tr/fiyatlar",
+    "https://www.fiskobirlik.com.tr/",
+]
+SERBEST_URLS = [
+    "https://www.findik.com/fiyatlar",
+]
+
+# ============================================================
+# SOSYAL MEDYA & HABER TAKİP KAYNAKLARI
+# - Facebook/Twitter(X)/Telegram gibi platformlar doğrudan
+#   taranamaz (giriş ister, engeller). Çözüm: RSSHub gibi bir
+#   köprü servisinin public sayfaları için ürettiği RSS akışları.
+# - Kendi RSSHub sunucunuz varsa RSS_HUB_BASE'i değiştirin.
+#   Örn: Facebook sayfası → {HUB}/facebook/page/SEFINE
+#        Telegram kanalı → {HUB}/telegram/channel/KANALADI
+#        Twitter/X       → {HUB}/twitter/user/KULLANICI
+# ============================================================
+RSS_HUB_BASE = os.environ.get("RSS_HUB_BASE", "https://rsshub.app")
+SOSYAL_KAYNAKLAR = [
+    # (ad, tür, adres)  tür: "rss" veya "html-liste"
+    ("Haberler.com — Fındık",            "rss", "https://www.haberler.com/findik/rss/"),
+    ("FİSKOBİRLİK Duyurular",            "html-liste", "https://www.fiskobirlik.com.tr/tr/haber_duyuru/0"),
+    ("FİSKOBİRLİK Basın Haberleri",      "html-liste", "https://www.fiskobirlik.com.tr/tr/haber_duyuru/1"),
+    ("TMO Duyurular",                    "html-liste", "https://www.tmo.gov.tr/"),
+]
+# Fiyat haberi sayılan anahtar kelimeler
+FIYAT_ANAHTARLAR = ["fındık", "fiyat", "TMO", "taban", "rekolte", "ihracat",
+                    "Ferrero", "Olam", "OFI", "levent", "kabuklu", "randıman"]
+# RSSHub köprüsü eklerseniz buraya örnekler (başında # olanlar kapalı):
+# ("Facebook — Fındık Fiyatları Giresun", "rss", RSS_HUB_BASE + "/facebook/page/grup-adi"),
+# ("Telegram — Fındık Piyasası",          "rss", RSS_HUB_BASE + "/telegram/channel/kanaladi"),
 
 # İlçe listesi (koordinat/varsayılan fiyat verisi gerçek çekim başarısız olursa kullanılır)
 ORDU_ILCELER = ["Altınordu","Ünye","Fatsa","Perşembe","Gölköy","Korgan","Kumru",
@@ -83,26 +113,54 @@ def log(cls, msg):
         STORE["scan_log"] = STORE["scan_log"][:200]
 
 def fetch_fiskobirlik():
-    """FİSKOBİRLİK sayfasından ilçe fiyatlarını çözer."""
-    try:
-        r = requests.get(KAYNAKLAR["fiskobirlik"], timeout=TIMEOUT,
-                         headers={"User-Agent": "Mozilla/5.0 (FindikRadar/1.0)"})
-        r.raise_for_status()
-        soup = BeautifulSoup(r.text, "lxml")
-        rows = []
-        # Genel tablo yakalama: her satırda ilçe adı + TL değeri aranır
-        for tr in soup.find_all("tr"):
-            cells = [c.get_text(strip=True) for c in tr.find_all(["td", "th"])]
-            if len(cells) >= 2:
-                ilce, fiyat = cells[0], cells[-1]
-                f = re.search(r"(\d{2,3})[.,](\d{2})", fiyat)
-                if f and any(i.lower() in ilce.lower() for i in ORDU_ILCELER + GIRESUN_ILCELER):
-                    rows.append({"ilce": ilce,
-                                 "fiyat": float(f.group(1) + "." + f.group(2))})
-        return rows, "fiskobirlik"
-    except Exception as e:
-        log("alert", f"FİSKOBİRLİK çekilemedi ({e.__class__.__name__}), yedek veriye dönüldü")
-        return None, None
+    """FİSKOBİRLİK sayfasından ilçe fiyatlarını çözer.
+    Birden fazla aday adresi sırayla dener; her hatanın detayını loglar."""
+    son_hata = ""
+    for url in FISKOBIRLIK_URLS:
+        try:
+            r = requests.get(url, timeout=TIMEOUT,
+                             headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                                                      "AppleWebKit/537.36 (KHTML, like Gecko) "
+                                                      "Chrome/124.0 Safari/537.36"})
+            log("info", f"FİSKOBİRLİK deneniyor: {url} → HTTP {r.status_code}, {len(r.text)} byte")
+            if r.status_code != 200:
+                son_hata = f"{url} → HTTP {r.status_code}"
+                continue
+            soup = BeautifulSoup(r.text, "lxml")
+            rows = []
+            # Genel tablo yakalama: her satırda ilçe adı + TL değeri aranır
+            for tr in soup.find_all("tr"):
+                cells = [c.get_text(strip=True) for c in tr.find_all(["td", "th"])]
+                if len(cells) >= 2:
+                    ilce, fiyat = cells[0], cells[-1]
+                    f = re.search(r"(\d{2,3})[.,](\d{2})", fiyat)
+                    if f and any(i.lower() in ilce.lower() for i in ORDU_ILCELER + GIRESUN_ILCELER):
+                        rows.append({"ilce": ilce,
+                                     "fiyat": float(f.group(1) + "." + f.group(2))})
+            if rows:
+                log("info", f"FİSKOBİRLİK başarılı: {len(rows)} ilçe fiyatı çözüldü ({url})")
+                return rows, "fiskobirlik"
+            son_hata = f"{url} → 200 OK ama tablo yapısı eşleşmedi (site tasarımı değişmiş olabilir)"
+            log("warn", son_hata)
+        except Exception as e:
+            son_hata = f"{url} → {e.__class__.__name__}: {e}"
+            log("alert", son_hata)
+    log("alert", f"FİSKOBİRLİK tüm adreslerden başarısız. Son hata: {son_hata}")
+    return None, None
+
+def diagnostik_yap():
+    """Hangi kaynağın neden çalışmadığını raporlar. /api/diagnostics ucu."""
+    rapor = []
+    for url in FISKOBIRLIK_URLS + SERBEST_URLS:
+        try:
+            r = requests.get(url, timeout=TIMEOUT,
+                             headers={"User-Agent": "Mozilla/5.0 (FindikRadar/1.0)"})
+            rapor.append({"url": url, "durum": "OK", "kod": r.status_code,
+                          "boyut": len(r.text)})
+        except Exception as e:
+            rapor.append({"url": url, "durum": "HATA",
+                          "hata": f"{e.__class__.__name__}: {e}"})
+    return rapor
 
 def fetch_serbest_piyasa():
     """Serbest piyasa sayfasını dener; başarısızsa None döner."""
@@ -118,6 +176,90 @@ def fetch_serbest_piyasa():
         return avg
     except Exception:
         return None
+
+# ============================================================
+# SOSYAL MEDYA / HABER TAKİP MOTORU
+# ============================================================
+def rss_oku(url, ad):
+    """RSS/Atom akışındaki öğeleri döner: [{baslik, tarih, kaynak}]"""
+    try:
+        r = requests.get(url, timeout=20,
+                         headers={"User-Agent": "Mozilla/5.0 (FindikRadar/1.0)"})
+        r.raise_for_status()
+        import xml.etree.ElementTree as ET
+        root = ET.fromstring(r.content)
+        items = root.findall(".//item") or root.findall(".//{http://www.w3.org/2005/Atom}entry")
+        sonuc = []
+        for it in items[:15]:
+            baslik = (it.findtext("title")
+                      or it.findtext("{http://www.w3.org/2005/Atom}title") or "").strip()
+            tarih = (it.findtext("pubDate")
+                     or it.findtext("{http://www.w3.org/2005/Atom}published")
+                     or it.findtext("{http://www.w3.org/2005/Atom}updated") or "")
+            if baslik:
+                from html import unescape
+                sonuc.append({"baslik": unescape(baslik), "tarih": tarih[:25], "kaynak": ad})
+        return sonuc
+    except Exception as e:
+        log("warn", f"Sosyal tarama: {ad} RSS okunamadı ({e.__class__.__name__})")
+        return []
+
+def html_liste_oku(url, ad):
+    """Haber/duyuru listesi sayfasından başlık+tarih çıkarır."""
+    try:
+        r = requests.get(url, timeout=20,
+                         headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                                                  "Chrome/124.0 Safari/537.36"})
+        r.raise_for_status()
+        soup = BeautifulSoup(r.text, "lxml")
+        sonuc = []
+        for a in soup.find_all("a", href=True):
+            if "/bdetay/" in a["href"]:
+                t = a.get_text(" ", strip=True)
+                if len(t) > 12 and not t.startswith("Tüm"):
+                    sonuc.append({"baslik": t, "tarih": "", "kaynak": ad,
+                                  "link": "https://www.fiskobirlik.com.tr" + a["href"]})
+        return sonuc[:10]
+    except Exception as e:
+        log("warn", f"Sosyal tarama: {ad} listesi okunamadı ({e.__class__.__name__})")
+        return []
+
+def fiyat_sinyali_mi(baslik):
+    """Haber başlığında fiyat rakamı var mı? '10x,xx TL' gibi."""
+    m = re.search(r"(1\d\d)[.,](\d{2})\s*(TL|₺|tl|lira)", baslik)
+    return float(m.group(1) + "." + m.group(2)) if m else None
+
+def sosyal_tara():
+    """Tüm sosyal/haber kaynaklarını tarar, fiyat sinyallerini ve
+    güncel fındık haberlerini STORE'a işler. Saatlik çağrılır."""
+    tum = []
+    for ad, tur, url in SOSYAL_KAYNAKLAR:
+        if tur == "rss":
+            tum += rss_oku(url, ad)
+        else:
+            tum += html_liste_oku(url, ad)
+    if not tum:
+        log("warn", "Sosyal tarama: hiçbir kaynaktan veri alınamadı")
+        return
+    # Fiyat haberi olanları ayıkla
+    ilgili = [x for x in tum if any(k.lower() in x["baslik"].lower() for k in FIYAT_ANAHTARLAR)]
+    yeni_sayisi = 0
+    with _LOCK:
+        mevcut = {n[0] for n in STORE["news"]}
+        for x in ilgili[:12]:
+            anahtar = x["baslik"][:60]
+            if anahtar in mevcut:
+                continue
+            STORE["news"].insert(0, [x["baslik"], f"{x['kaynak']} — {x['tarih'] or 'yeni'}"])
+            yeni_sayisi += 1
+        STORE["news"] = STORE["news"][:20]
+    for x in ilgili:
+        sinyal = fiyat_sinyali_mi(x["baslik"])
+        if sinyal:
+            log("alert", f"💰 Fiyat sinyali ({x['kaynak']}): {x['baslik'][:80]} — tespit edilen: {sinyal:.2f} TL/kg")
+    log("info", f"🌐 Sosyal tarama: {len(tum)} öğe tarandı, {len(ilgili)} fındık haberi, {yeni_sayisi} tanesi yeniydi.")
+    if yeni_sayisi:
+        log("info", "📰 Haber akışı güncellendi.")
 
 def yedek_veri():
     """İnternet/bağlantı yoksa kullanılacak temel veri."""
@@ -226,14 +368,10 @@ def dongu_fiyat():
         time.sleep(UPDATE_INTERVAL_SEC)
 
 def dongu_tarama():
+    sosyal_tara()  # başlangıçta bir kez hemen tara
     while True:
         time.sleep(SCAN_INTERVAL_SEC)
-        kaynaklar = ["Ferrero procurement", "OFI/Olam export desk", "TMO duyuru",
-                     "Durak/Balsu/Yavuz kanalı", "ICE borsa", "Black Sea weather",
-                     "TÜİK dış ticaret", "FİSKOBİRLİK bülten"]
-        import random
-        k = random.choice(kaynaklar)
-        log("info", f"🌐 Saatlik tarama: {k} incelendi — rapor loglandı.")
+        sosyal_tara()  # saatlik: tüm kaynakları gerçekten tara
 
 def baslat_zamanlayicilar():
     threading.Thread(target=dongu_fiyat, daemon=True).start()
@@ -261,6 +399,10 @@ def api_yanit(yol):
             return 200, {"ok": True, "log": STORE["scan_log"][:50]}
         if yol == "/api/alarms":
             return 200, {"ok": True, "alarms": load_alarms()}
+        if yol == "/api/diagnostics":
+            return 200, {"ok": True, "kaynaklar": diagnostik_yap(),
+                         "mevcut_kaynak": STORE["source"],
+                         "telegram_ayarli": bool(TELEGRAM_TOKEN)}
     return 404, {"ok": False, "error": "bulunamadı"}
 
 def api_post(yol, govde_bytes):
@@ -283,6 +425,28 @@ def api_post(yol, govde_bytes):
         chat_id = govde.get("chat_id")
         ok = telegram_bildir(chat_id, "🌰 FındıkRadar bağlantı testi başarılı! Artık alarmlar bu sohbete düşecek.")
         return 200 if ok else 502, {"ok": ok}
+    if yol == "/api/prices":
+        # Elle fiyat güncelleme: {"fiyatlar": {"Ünye": 105.5, "Tirebolu": 106.0}}
+        fiyatlar = govde.get("fiyatlar", {})
+        if not isinstance(fiyatlar, dict) or not fiyatlar:
+            return 400, {"ok": False, "error": "fiyatlar sözlüğü gerekli: {\"İlçe\": 105.5}"}
+        with _LOCK:
+            eski = {d["ilce"]: d["fiyat"] for d in STORE["districts"]}
+            guncellenen = []
+            for d in STORE["districts"]:
+                if d["ilce"] in fiyatlar:
+                    try:
+                        yeni = float(str(fiyatlar[d["ilce"]]).replace(",", "."))
+                    except ValueError:
+                        continue
+                    d["degisim"] = round(yeni - d["fiyat"], 2)
+                    d["fiyat"] = yeni
+                    guncellenen.append(d["ilce"])
+            STORE["updated_at"] = datetime.datetime.now().isoformat(timespec="seconds")
+            STORE["source"] = "MANUEL GİRİŞ"
+        log("warn", f"✍️ Elle fiyat güncellendi: {', '.join(guncellenen)} ({len(guncellenen)} ilçe)")
+        kontrol_alarms()
+        return 200, {"ok": True, "guncellenen": guncellenen}
     return 404, {"ok": False, "error": "bulunamadı"}
 
 class Handler(BaseHTTPRequestHandler):
